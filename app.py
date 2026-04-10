@@ -6,17 +6,15 @@ import matplotlib.patches as mpatches
 import plotly.express as px
 import io
 
-st.set_page_config(page_title="Mapa de Diretorias - RS", layout="wide")
+st.set_page_config(page_title="Mapa Corsan", layout="wide")
 
-st.title("🗺️ Mapa de Reestruturação - Diretorias do RS")
+st.title("🗺️ Mapa das regionais Corsan")
 st.markdown("Explore o mapa interativo ou baixe as versões em alta resolução nas abas seguintes.")
 
-# 1. Carregamento de Dados (Agora automático, direto da pasta)
 @st.cache_data
 def load_data():
-    # Carrega o mapa e converte para o formato de coordenadas global (necessário para o mapa interativo)
     mapa = gpd.read_file("rs_municipios.geojson").to_crs(epsg=4326)
-    # Carrega a planilha direto da pasta do projeto
+    # Nome do arquivo atualizado conforme o seu envio
     planilha = pd.read_excel("Reestruturaao_Oficial_1.xlsx")
     return mapa, planilha
 
@@ -24,10 +22,9 @@ with st.spinner("Carregando base de dados e mapas..."):
     try:
         rs_map, df = load_data()
     except FileNotFoundError:
-        st.error("⚠️ Arquivo não encontrado! Certifique-se de que 'rs_municipios.geojson' e 'Reestruturaao_Oficial_1.xlsx' estão na mesma pasta do app.py.")
+        st.error("⚠️ Arquivo não encontrado! Verifique os nomes dos arquivos na pasta.")
         st.stop()
 
-# Padronização e Cruzamento
 df['CIDADE'] = df['CIDADE'].astype(str).str.upper().str.strip()
 rs_map['name_muni'] = rs_map['name_muni'].astype(str).str.upper().str.strip()
 
@@ -45,31 +42,29 @@ for i, diretoria in enumerate(diretorias_unicas):
     cor_padrao = cores_iniciais[i % len(cores_iniciais)]
     dicionario_cores[diretoria] = st.sidebar.color_picker(f"{diretoria}", cor_padrao)
 
-# --- CRIAÇÃO DAS ABAS ---
 nomes_abas = ["📍 Mapa Interativo", "Visão Geral (Download)"] + diretorias_unicas
 abas = st.tabs(nomes_abas)
 
 # ==========================================
-# ABA 0: MAPA INTERATIVO (PLOTLY)
+# ABA 0: MAPA INTERATIVO (PLOTLY) COM ZOOM
 # ==========================================
 with abas[0]:
     st.subheader("Busca e Exploração Interativa")
 
-    # Caixa de pesquisa de cidades
     lista_cidades = sorted(cidades_destaque['name_muni'].unique())
     cidade_selecionada = st.selectbox("🔍 Digite ou selecione uma cidade para destacar:", [""] + lista_cidades)
 
-    # Preparando os dados para o mapa interativo
     mapa_interativo = mapa_diretorias.copy()
 
-    # Lógica de destaque
+    # Variáveis padrão de câmera (Visão geral do estado)
+    mapa_zoom = 5.5
+    mapa_centro = {"lat": -30.0, "lon": -53.5}
+
     if cidade_selecionada == "":
-        # Se nada foi digitado, mostra o mapa normal colorido pelas regionais
         mapa_interativo['Status_Cor'] = mapa_interativo['DIRETORIA']
         cores_plotly = dicionario_cores.copy()
         cores_plotly['Sem Diretoria'] = '#E0E0E0'
     else:
-        # Se uma cidade foi selecionada, aplica a lógica de destaque
         regional_alvo = mapa_interativo[mapa_interativo['name_muni'] == cidade_selecionada]['DIRETORIA'].values[0]
 
         def definir_destaque(row):
@@ -82,17 +77,23 @@ with abas[0]:
 
         mapa_interativo['Status_Cor'] = mapa_interativo.apply(definir_destaque, axis=1)
 
-        # Define as cores do destaque: Cidade (Vermelho forte), Regional (Cor escolhida), Resto (Cinza claro)
         cores_plotly = {
             '📍 Cidade Selecionada': '#FF0000', 
             f'Regional: {regional_alvo}': dicionario_cores[regional_alvo],
             'Outras Regiões': '#F0F0F0'
         }
 
-    # Configurando o índice para o Plotly funcionar corretamente
+        # --- LÓGICA DE ZOOM AUTOMÁTICO ---
+        # Encontra a geometria da cidade selecionada e calcula o centro dela
+        geometria_cidade = mapa_interativo[mapa_interativo['name_muni'] == cidade_selecionada].geometry.iloc[0]
+        centroide = geometria_cidade.centroid
+
+        # Atualiza a câmera para focar na cidade
+        mapa_centro = {"lat": centroide.y, "lon": centroide.x}
+        mapa_zoom = 8.0 # Nível de zoom (ajuste para mais ou para menos se preferir)
+
     mapa_interativo = mapa_interativo.set_index('name_muni')
 
-    # Gerando o mapa interativo
     fig_interativa = px.choropleth_mapbox(
         mapa_interativo,
         geojson=mapa_interativo.geometry,
@@ -100,16 +101,16 @@ with abas[0]:
         color='Status_Cor',
         color_discrete_map=cores_plotly,
         mapbox_style="carto-positron",
-        zoom=5.5,
-        center={"lat": -30.0, "lon": -53.5},
+        zoom=mapa_zoom,          # Câmera dinâmica
+        center=mapa_centro,      # Câmera dinâmica
         opacity=0.8,
         hover_name=mapa_interativo.index,
-        hover_data={'DIRETORIA': True, 'Status_Cor': False}
+        hover_data={'DIRETORIA': True, 'Status_Cor': False},
+        height=750               # Aumenta a altura do mapa na tela
     )
 
     fig_interativa.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
     st.plotly_chart(fig_interativa, use_container_width=True)
-
 
 # ==========================================
 # FUNÇÕES E ABAS DE DOWNLOAD (MATPLOTLIB)
@@ -146,14 +147,12 @@ def gerar_buffer_download(fig):
     buf.seek(0)
     return buf
 
-# Aba Visão Geral (Download)
 with abas[1]:
     with st.spinner("Gerando mapa geral para download..."):
         fig_geral = criar_figura_mapa(rs_map, cidades_destaque, dicionario_cores)
         st.pyplot(fig_geral)
         st.download_button("📥 Baixar Mapa Geral (PNG)", data=gerar_buffer_download(fig_geral), file_name="mapa_geral.png", mime="image/png")
 
-# Abas Individuais (Download)
 for i, diretoria in enumerate(diretorias_unicas):
     with abas[i + 2]:
         with st.spinner(f"Gerando mapa da regional {diretoria}..."):
