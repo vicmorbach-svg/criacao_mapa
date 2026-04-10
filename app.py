@@ -52,26 +52,40 @@ with abas[0]:
 
     lista_cidades = sorted(cidades_destaque['name_muni'].unique())
 
-    # 1. Inicializa a memória do aplicativo para saber qual cidade está clicada/buscada
+    # 1. Inicializa variáveis de estado (incluindo a chave de reset do mapa)
     if 'cidade_selecionada' not in st.session_state:
         st.session_state.cidade_selecionada = None
+    if 'map_key' not in st.session_state:
+        st.session_state.map_key = 0
 
-    # Descobre a posição da cidade na lista para mostrar na caixa de busca
+    # Descobre a posição da cidade na lista
     index_selecionado = None
     if st.session_state.cidade_selecionada in lista_cidades:
         index_selecionado = lista_cidades.index(st.session_state.cidade_selecionada)
 
-    # 2. Caixa de pesquisa com botão "X" nativo para limpar facilmente
-    nova_selecao = st.selectbox(
-        "🔍 Digite, selecione ou clique no mapa para destacar uma cidade:", 
-        lista_cidades, 
-        index=index_selecionado,
-        placeholder="Escolha uma cidade ou clique no 'X' ao lado para limpar 👉"
-    )
+    # 2. Interface de busca e botão de limpar lado a lado
+    col1, col2 = st.columns([4, 1])
 
-    # Se o usuário mudou a cidade pela caixa de texto, atualiza a memória e recarrega
+    with col1:
+        nova_selecao = st.selectbox(
+            "🔍 Digite, selecione ou clique no mapa para destacar uma cidade:", 
+            lista_cidades, 
+            index=index_selecionado,
+            placeholder="Escolha uma cidade..."
+        )
+
+    with col2:
+        st.write("") # Espaçamento para alinhar os botões
+        st.write("")
+        if st.button("🗑️ Limpar Seleção", use_container_width=True):
+            nova_selecao = None # Força a limpeza se o botão for clicado
+
+    # 3. Lógica de atualização: Se a seleção mudou (pela caixa ou pelo botão)
     if nova_selecao != st.session_state.cidade_selecionada:
         st.session_state.cidade_selecionada = nova_selecao
+        # A MÁGICA: Se a seleção ficou vazia, muda a chave do mapa para forçar ele a esquecer o clique anterior
+        if nova_selecao is None:
+            st.session_state.map_key += 1
         st.rerun()
 
     cidade_atual = st.session_state.cidade_selecionada
@@ -130,19 +144,19 @@ with abas[0]:
 
     fig_interativa.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
 
-    # 3. Renderiza o mapa com eventos de clique e scroll do mouse ativados
+    # 4. Renderiza o mapa usando a chave dinâmica
     evento_mapa = st.plotly_chart(
         fig_interativa, 
         use_container_width=True,
-        on_select="rerun",          # Faz o mapa escutar o clique
-        selection_mode="points",    # Seleciona a cidade clicada
-        config={'scrollZoom': True} # Permite dar zoom com a rodinha do mouse
+        on_select="rerun",
+        selection_mode="points",
+        config={'scrollZoom': True},
+        key=f"mapa_interativo_{st.session_state.map_key}" # Chave que reseta a memória do mapa
     )
 
-    # 4. Lógica: Se o usuário clicou em uma cidade no mapa
+    # 5. Lógica de clique no mapa
     if evento_mapa and len(evento_mapa.selection["points"]) > 0:
         cidade_clicada = evento_mapa.selection["points"][0]["location"]
-        # Se a cidade clicada for diferente da atual, atualiza a memória e recarrega a tela
         if cidade_clicada != st.session_state.cidade_selecionada:
             st.session_state.cidade_selecionada = cidade_clicada
             st.rerun()
