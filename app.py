@@ -6,15 +6,14 @@ import matplotlib.patches as mpatches
 import plotly.express as px
 import io
 
-st.set_page_config(page_title="Mapa Corsan", layout="wide")
+st.set_page_config(page_title="Mapa de Diretorias - RS", layout="wide")
 
-st.title("🗺️ Mapa das regionais Corsan")
+st.title("🗺️ Mapa de Reestruturação - Diretorias do RS")
 st.markdown("Explore o mapa interativo ou baixe as versões em alta resolução nas abas seguintes.")
 
 @st.cache_data
 def load_data():
     mapa = gpd.read_file("rs_municipios.geojson").to_crs(epsg=4326)
-    # Nome do arquivo atualizado conforme o seu envio
     planilha = pd.read_excel("Reestruturaao_Oficial_1.xlsx")
     return mapa, planilha
 
@@ -46,29 +45,52 @@ nomes_abas = ["📍 Mapa Interativo", "Visão Geral (Download)"] + diretorias_un
 abas = st.tabs(nomes_abas)
 
 # ==========================================
-# ABA 0: MAPA INTERATIVO (PLOTLY) COM ZOOM
+# ABA 0: MAPA INTERATIVO (PLOTLY)
 # ==========================================
 with abas[0]:
     st.subheader("Busca e Exploração Interativa")
 
     lista_cidades = sorted(cidades_destaque['name_muni'].unique())
-    cidade_selecionada = st.selectbox("🔍 Digite ou selecione uma cidade para destacar:", [""] + lista_cidades)
+
+    # 1. Inicializa a memória do aplicativo para saber qual cidade está clicada/buscada
+    if 'cidade_selecionada' not in st.session_state:
+        st.session_state.cidade_selecionada = None
+
+    # Descobre a posição da cidade na lista para mostrar na caixa de busca
+    index_selecionado = None
+    if st.session_state.cidade_selecionada in lista_cidades:
+        index_selecionado = lista_cidades.index(st.session_state.cidade_selecionada)
+
+    # 2. Caixa de pesquisa com botão "X" nativo para limpar facilmente
+    nova_selecao = st.selectbox(
+        "🔍 Digite, selecione ou clique no mapa para destacar uma cidade:", 
+        lista_cidades, 
+        index=index_selecionado,
+        placeholder="Escolha uma cidade ou clique no 'X' ao lado para limpar 👉"
+    )
+
+    # Se o usuário mudou a cidade pela caixa de texto, atualiza a memória e recarrega
+    if nova_selecao != st.session_state.cidade_selecionada:
+        st.session_state.cidade_selecionada = nova_selecao
+        st.rerun()
+
+    cidade_atual = st.session_state.cidade_selecionada
 
     mapa_interativo = mapa_diretorias.copy()
 
-    # Variáveis padrão de câmera (Visão geral do estado)
+    # Variáveis padrão de câmera
     mapa_zoom = 5.5
     mapa_centro = {"lat": -30.0, "lon": -53.5}
 
-    if cidade_selecionada == "":
+    if cidade_atual is None:
         mapa_interativo['Status_Cor'] = mapa_interativo['DIRETORIA']
         cores_plotly = dicionario_cores.copy()
         cores_plotly['Sem Diretoria'] = '#E0E0E0'
     else:
-        regional_alvo = mapa_interativo[mapa_interativo['name_muni'] == cidade_selecionada]['DIRETORIA'].values[0]
+        regional_alvo = mapa_interativo[mapa_interativo['name_muni'] == cidade_atual]['DIRETORIA'].values[0]
 
         def definir_destaque(row):
-            if row['name_muni'] == cidade_selecionada:
+            if row['name_muni'] == cidade_atual:
                 return '📍 Cidade Selecionada'
             elif row['DIRETORIA'] == regional_alvo:
                 return f'Regional: {regional_alvo}'
@@ -83,14 +105,11 @@ with abas[0]:
             'Outras Regiões': '#F0F0F0'
         }
 
-        # --- LÓGICA DE ZOOM AUTOMÁTICO ---
-        # Encontra a geometria da cidade selecionada e calcula o centro dela
-        geometria_cidade = mapa_interativo[mapa_interativo['name_muni'] == cidade_selecionada].geometry.iloc[0]
+        # Lógica de zoom automático
+        geometria_cidade = mapa_interativo[mapa_interativo['name_muni'] == cidade_atual].geometry.iloc[0]
         centroide = geometria_cidade.centroid
-
-        # Atualiza a câmera para focar na cidade
         mapa_centro = {"lat": centroide.y, "lon": centroide.x}
-        mapa_zoom = 8.0 # Nível de zoom (ajuste para mais ou para menos se preferir)
+        mapa_zoom = 8.0
 
     mapa_interativo = mapa_interativo.set_index('name_muni')
 
@@ -101,16 +120,32 @@ with abas[0]:
         color='Status_Cor',
         color_discrete_map=cores_plotly,
         mapbox_style="carto-positron",
-        zoom=mapa_zoom,          # Câmera dinâmica
-        center=mapa_centro,      # Câmera dinâmica
+        zoom=mapa_zoom,
+        center=mapa_centro,
         opacity=0.8,
         hover_name=mapa_interativo.index,
         hover_data={'DIRETORIA': True, 'Status_Cor': False},
-        height=750               # Aumenta a altura do mapa na tela
+        height=750
     )
 
     fig_interativa.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
-    st.plotly_chart(fig_interativa, use_container_width=True)
+
+    # 3. Renderiza o mapa com eventos de clique e scroll do mouse ativados
+    evento_mapa = st.plotly_chart(
+        fig_interativa, 
+        use_container_width=True,
+        on_select="rerun",          # Faz o mapa escutar o clique
+        selection_mode="points",    # Seleciona a cidade clicada
+        config={'scrollZoom': True} # Permite dar zoom com a rodinha do mouse
+    )
+
+    # 4. Lógica: Se o usuário clicou em uma cidade no mapa
+    if evento_mapa and len(evento_mapa.selection["points"]) > 0:
+        cidade_clicada = evento_mapa.selection["points"][0]["location"]
+        # Se a cidade clicada for diferente da atual, atualiza a memória e recarrega a tela
+        if cidade_clicada != st.session_state.cidade_selecionada:
+            st.session_state.cidade_selecionada = cidade_clicada
+            st.rerun()
 
 # ==========================================
 # FUNÇÕES E ABAS DE DOWNLOAD (MATPLOTLIB)
