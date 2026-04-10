@@ -6,9 +6,9 @@ import matplotlib.patches as mpatches
 import plotly.express as px
 import io
 
-st.set_page_config(page_title="Mapa de Diretorias - RS", layout="wide")
+st.set_page_config(page_title="Mapa Corsan", layout="wide")
 
-st.title("🗺️ Mapa de Reestruturação - Diretorias do RS")
+st.title("🗺️ Mapa das regionais Corsan")
 st.markdown("Explore o mapa interativo ou baixe as versões em alta resolução nas abas seguintes.")
 
 @st.cache_data
