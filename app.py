@@ -195,7 +195,7 @@ def criar_figura_mapa(rs_map, cidades_destaque, dicionario_cores, diretoria_espe
 
 def gerar_buffer_download(fig):
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=300, bbox_inches='tight')
+    fig.savefig(buf, format="png", dpi=300, bbox_inches='tight', transparent=True)
     buf.seek(0)
     return buf
 
