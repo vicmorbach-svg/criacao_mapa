@@ -176,7 +176,7 @@ def criar_figura_mapa(rs_map, cidades_destaque, dicionario_cores, diretoria_espe
                 subset.plot(ax=ax, color=cor, edgecolor='black', linewidth=0.8)
                 itens_legenda.append(mpatches.Patch(color=cor, label=diretoria))
         ax.legend(handles=itens_legenda, title='Diretorias Regionais', loc='lower right')
-        plt.title("Distribuição Geral das Diretorias no RS", fontsize=16, fontweight='bold')
+        plt.title("Distribuição regionais Corsan", fontsize=16, fontweight='bold')
     else:
         cor = dicionario_cores[diretoria_especifica]
         subset = cidades_destaque[cidades_destaque['DIRETORIA'] == diretoria_especifica]
@@ -184,7 +184,7 @@ def criar_figura_mapa(rs_map, cidades_destaque, dicionario_cores, diretoria_espe
             subset.plot(ax=ax, color=cor, edgecolor='black', linewidth=0.8)
             itens_legenda.append(mpatches.Patch(color=cor, label=diretoria_especifica))
         ax.legend(handles=itens_legenda, title='Diretoria', loc='lower right')
-        plt.title(f"Diretoria Regional: {diretoria_especifica}", fontsize=16, fontweight='bold')
+        plt.title(f"Regional: {diretoria_especifica}", fontsize=16, fontweight='bold')
 
     plt.axis('off')
     plt.tight_layout()
