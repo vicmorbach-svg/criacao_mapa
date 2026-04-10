@@ -4,3 +4,6 @@ geopandas
 matplotlib
 geobr
 openpyxl
+libxml2-dev
+libxslt1-dev
+libgeos-dev
