@@ -1,6 +1,6 @@
-streamlit 
-pandas 
+streamlit
+pandas
 geopandas
-matplotlib 
-geobr 
+matplotlib
+geobr
 openpyxl
