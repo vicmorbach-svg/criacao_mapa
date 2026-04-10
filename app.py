@@ -31,15 +31,18 @@ mapa_diretorias = rs_map.merge(df, how="left", left_on="name_muni", right_on="CI
 mapa_diretorias['DIRETORIA'] = mapa_diretorias['DIRETORIA'].fillna('Sem Diretoria')
 cidades_destaque = mapa_diretorias[mapa_diretorias['DIRETORIA'] != 'Sem Diretoria']
 
-# --- BARRA LATERAL (CORES) ---
-st.sidebar.header("🎨 Personalizar Cores")
+# CORES FIXAS DAS REGIONAIS
+# ==========================================
+# Altere os códigos hexadecimais abaixo se desejar mudar as cores no futuro
+dicionario_cores = {
+    'CENTRAL': '#F8DC00', # Amarelo Pequi
+    'LESTE': '#17E3CB',   # Turquesa Rio
+    'NORTE': '#FE952B',   # Laranja-da-Baía
+    'OESTE': '#0027BD',   # Azul Mar
+    'SUL': '#A11FFF'      # Roxo Açai
+}
 diretorias_unicas = sorted(df['DIRETORIA'].dropna().unique())
-cores_iniciais = ['#FF9999', '#66B2FF', '#99FF99', '#FFCC99', '#C2C2F0', '#FFB3E6']
 
-dicionario_cores = {}
-for i, diretoria in enumerate(diretorias_unicas):
-    cor_padrao = cores_iniciais[i % len(cores_iniciais)]
-    dicionario_cores[diretoria] = st.sidebar.color_picker(f"{diretoria}", cor_padrao)
 
 nomes_abas = ["📍 Mapa Interativo", "Visão Geral (Download)"] + diretorias_unicas
 abas = st.tabs(nomes_abas)
