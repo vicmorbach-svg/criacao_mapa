@@ -3,49 +3,136 @@ import pandas as pd
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-import io # Necessário para gerar o arquivo de download em memória
+import plotly.express as px
+import io
 
-# Configuração inicial da página
 st.set_page_config(page_title="Mapa de Diretorias - RS", layout="wide")
 
 st.title("🗺️ Mapa de Reestruturação - Diretorias do RS")
-st.markdown("Faça o upload da sua planilha, personalize as cores e baixe os mapas em alta resolução.")
+st.markdown("Explore o mapa interativo ou baixe as versões em alta resolução nas abas seguintes.")
 
+# 1. Carregamento de Dados (Agora automático, direto da pasta)
 @st.cache_data
-def load_map_data():
-    return gpd.read_file("rs_municipios.geojson")
+def load_data():
+    # Carrega o mapa e converte para o formato de coordenadas global (necessário para o mapa interativo)
+    mapa = gpd.read_file("rs_municipios.geojson").to_crs(epsg=4326)
+    # Carrega a planilha direto da pasta do projeto
+    planilha = pd.read_excel("Reestruturaao_Oficial_1.xlsx")
+    return mapa, planilha
 
-with st.spinner("Carregando mapa local..."):
-    rs_map = load_map_data()
+with st.spinner("Carregando base de dados e mapas..."):
+    try:
+        rs_map, df = load_data()
+    except FileNotFoundError:
+        st.error("⚠️ Arquivo não encontrado! Certifique-se de que 'rs_municipios.geojson' e 'Reestruturaao_Oficial_1.xlsx' estão na mesma pasta do app.py.")
+        st.stop()
 
-# Função auxiliar para desenhar os mapas (evita repetição de código)
+# Padronização e Cruzamento
+df['CIDADE'] = df['CIDADE'].astype(str).str.upper().str.strip()
+rs_map['name_muni'] = rs_map['name_muni'].astype(str).str.upper().str.strip()
+
+mapa_diretorias = rs_map.merge(df, how="left", left_on="name_muni", right_on="CIDADE")
+mapa_diretorias['DIRETORIA'] = mapa_diretorias['DIRETORIA'].fillna('Sem Diretoria')
+cidades_destaque = mapa_diretorias[mapa_diretorias['DIRETORIA'] != 'Sem Diretoria']
+
+# --- BARRA LATERAL (CORES) ---
+st.sidebar.header("🎨 Personalizar Cores")
+diretorias_unicas = sorted(df['DIRETORIA'].dropna().unique())
+cores_iniciais = ['#FF9999', '#66B2FF', '#99FF99', '#FFCC99', '#C2C2F0', '#FFB3E6']
+
+dicionario_cores = {}
+for i, diretoria in enumerate(diretorias_unicas):
+    cor_padrao = cores_iniciais[i % len(cores_iniciais)]
+    dicionario_cores[diretoria] = st.sidebar.color_picker(f"{diretoria}", cor_padrao)
+
+# --- CRIAÇÃO DAS ABAS ---
+nomes_abas = ["📍 Mapa Interativo", "Visão Geral (Download)"] + diretorias_unicas
+abas = st.tabs(nomes_abas)
+
+# ==========================================
+# ABA 0: MAPA INTERATIVO (PLOTLY)
+# ==========================================
+with abas[0]:
+    st.subheader("Busca e Exploração Interativa")
+
+    # Caixa de pesquisa de cidades
+    lista_cidades = sorted(cidades_destaque['name_muni'].unique())
+    cidade_selecionada = st.selectbox("🔍 Digite ou selecione uma cidade para destacar:", [""] + lista_cidades)
+
+    # Preparando os dados para o mapa interativo
+    mapa_interativo = mapa_diretorias.copy()
+
+    # Lógica de destaque
+    if cidade_selecionada == "":
+        # Se nada foi digitado, mostra o mapa normal colorido pelas regionais
+        mapa_interativo['Status_Cor'] = mapa_interativo['DIRETORIA']
+        cores_plotly = dicionario_cores.copy()
+        cores_plotly['Sem Diretoria'] = '#E0E0E0'
+    else:
+        # Se uma cidade foi selecionada, aplica a lógica de destaque
+        regional_alvo = mapa_interativo[mapa_interativo['name_muni'] == cidade_selecionada]['DIRETORIA'].values[0]
+
+        def definir_destaque(row):
+            if row['name_muni'] == cidade_selecionada:
+                return '📍 Cidade Selecionada'
+            elif row['DIRETORIA'] == regional_alvo:
+                return f'Regional: {regional_alvo}'
+            else:
+                return 'Outras Regiões'
+
+        mapa_interativo['Status_Cor'] = mapa_interativo.apply(definir_destaque, axis=1)
+
+        # Define as cores do destaque: Cidade (Vermelho forte), Regional (Cor escolhida), Resto (Cinza claro)
+        cores_plotly = {
+            '📍 Cidade Selecionada': '#FF0000', 
+            f'Regional: {regional_alvo}': dicionario_cores[regional_alvo],
+            'Outras Regiões': '#F0F0F0'
+        }
+
+    # Configurando o índice para o Plotly funcionar corretamente
+    mapa_interativo = mapa_interativo.set_index('name_muni')
+
+    # Gerando o mapa interativo
+    fig_interativa = px.choropleth_mapbox(
+        mapa_interativo,
+        geojson=mapa_interativo.geometry,
+        locations=mapa_interativo.index,
+        color='Status_Cor',
+        color_discrete_map=cores_plotly,
+        mapbox_style="carto-positron",
+        zoom=5.5,
+        center={"lat": -30.0, "lon": -53.5},
+        opacity=0.8,
+        hover_name=mapa_interativo.index,
+        hover_data={'DIRETORIA': True, 'Status_Cor': False}
+    )
+
+    fig_interativa.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
+    st.plotly_chart(fig_interativa, use_container_width=True)
+
+
+# ==========================================
+# FUNÇÕES E ABAS DE DOWNLOAD (MATPLOTLIB)
+# ==========================================
 def criar_figura_mapa(rs_map, cidades_destaque, dicionario_cores, diretoria_especifica=None):
     fig, ax = plt.subplots(figsize=(12, 10))
-
-    # Fundo cinza (todas as cidades)
     rs_map.plot(ax=ax, color='#e0e0e0', edgecolor='white', linewidth=0.5)
     itens_legenda = []
 
     if diretoria_especifica is None:
-        # Modo: MAPA GERAL
         for diretoria, cor in dicionario_cores.items():
             subset = cidades_destaque[cidades_destaque['DIRETORIA'] == diretoria]
             if not subset.empty:
                 subset.plot(ax=ax, color=cor, edgecolor='black', linewidth=0.8)
                 itens_legenda.append(mpatches.Patch(color=cor, label=diretoria))
-
         ax.legend(handles=itens_legenda, title='Diretorias Regionais', loc='lower right')
         plt.title("Distribuição Geral das Diretorias no RS", fontsize=16, fontweight='bold')
-
     else:
-        # Modo: MAPA INDIVIDUAL
         cor = dicionario_cores[diretoria_especifica]
         subset = cidades_destaque[cidades_destaque['DIRETORIA'] == diretoria_especifica]
-
         if not subset.empty:
             subset.plot(ax=ax, color=cor, edgecolor='black', linewidth=0.8)
             itens_legenda.append(mpatches.Patch(color=cor, label=diretoria_especifica))
-
         ax.legend(handles=itens_legenda, title='Diretoria', loc='lower right')
         plt.title(f"Diretoria Regional: {diretoria_especifica}", fontsize=16, fontweight='bold')
 
@@ -53,71 +140,23 @@ def criar_figura_mapa(rs_map, cidades_destaque, dicionario_cores, diretoria_espe
     plt.tight_layout()
     return fig
 
-# Função para converter a figura em um arquivo baixável de alta qualidade
 def gerar_buffer_download(fig):
     buf = io.BytesIO()
-    # dpi=300 garante a alta qualidade da imagem
     fig.savefig(buf, format="png", dpi=300, bbox_inches='tight')
     buf.seek(0)
     return buf
 
-# ==========================================
-# LÓGICA PRINCIPAL DO APP
-# ==========================================
-uploaded_file = st.file_uploader("Selecione a planilha Excel", type=["xlsx"])
+# Aba Visão Geral (Download)
+with abas[1]:
+    with st.spinner("Gerando mapa geral para download..."):
+        fig_geral = criar_figura_mapa(rs_map, cidades_destaque, dicionario_cores)
+        st.pyplot(fig_geral)
+        st.download_button("📥 Baixar Mapa Geral (PNG)", data=gerar_buffer_download(fig_geral), file_name="mapa_geral.png", mime="image/png")
 
-if uploaded_file is not None:
-    df = pd.read_excel(uploaded_file)
-
-    if 'CIDADE' in df.columns and 'DIRETORIA' in df.columns:
-        df['CIDADE'] = df['CIDADE'].astype(str).str.upper().str.strip()
-        rs_map['name_muni'] = rs_map['name_muni'].astype(str).str.upper().str.strip()
-
-        mapa_diretorias = rs_map.merge(df, how="left", left_on="name_muni", right_on="CIDADE")
-        cidades_destaque = mapa_diretorias.dropna(subset=['DIRETORIA'])
-
-        # --- BARRA LATERAL (CORES) ---
-        st.sidebar.header("🎨 Personalizar Cores")
-        diretorias_unicas = sorted(df['DIRETORIA'].dropna().unique())
-        cores_iniciais = ['#FF9999', '#66B2FF', '#99FF99', '#FFCC99', '#C2C2F0', '#FFB3E6']
-
-        dicionario_cores = {}
-        for i, diretoria in enumerate(diretorias_unicas):
-            cor_padrao = cores_iniciais[i % len(cores_iniciais)]
-            dicionario_cores[diretoria] = st.sidebar.color_picker(f"{diretoria}", cor_padrao)
-
-        # --- CRIAÇÃO DAS ABAS (TABS) ---
-        nomes_abas = ["Visão Geral"] + diretorias_unicas
-        abas = st.tabs(nomes_abas)
-
-        # Aba 1: Visão Geral
-        with abas[0]:
-            with st.spinner("Gerando mapa geral..."):
-                fig_geral = criar_figura_mapa(rs_map, cidades_destaque, dicionario_cores)
-                st.pyplot(fig_geral)
-
-                st.download_button(
-                    label="📥 Baixar Mapa Geral em Alta Qualidade (PNG)",
-                    data=gerar_buffer_download(fig_geral),
-                    file_name="mapa_geral_rs.png",
-                    mime="image/png",
-                    use_container_width=True
-                )
-
-        # Abas Seguintes: Mapas Individuais
-        for i, diretoria in enumerate(diretorias_unicas):
-            with abas[i + 1]: # +1 porque a aba 0 é a Visão Geral
-                with st.spinner(f"Gerando mapa da regional {diretoria}..."):
-                    fig_ind = criar_figura_mapa(rs_map, cidades_destaque, dicionario_cores, diretoria_especifica=diretoria)
-                    st.pyplot(fig_ind)
-
-                    st.download_button(
-                        label=f"📥 Baixar Mapa {diretoria} em Alta Qualidade (PNG)",
-                        data=gerar_buffer_download(fig_ind),
-                        file_name=f"mapa_{diretoria.lower()}.png",
-                        mime="image/png",
-                        use_container_width=True
-                    )
-
-    else:
-        st.error("Erro: A planilha precisa conter as colunas 'CIDADE' e 'DIRETORIA'.")
+# Abas Individuais (Download)
+for i, diretoria in enumerate(diretorias_unicas):
+    with abas[i + 2]:
+        with st.spinner(f"Gerando mapa da regional {diretoria}..."):
+            fig_ind = criar_figura_mapa(rs_map, cidades_destaque, dicionario_cores, diretoria_especifica=diretoria)
+            st.pyplot(fig_ind)
+            st.download_button(f"📥 Baixar Mapa {diretoria} (PNG)", data=gerar_buffer_download(fig_ind), file_name=f"mapa_{diretoria.lower()}.png", mime="image/png")
