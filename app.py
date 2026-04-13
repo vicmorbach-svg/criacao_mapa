@@ -9,7 +9,7 @@ import io
 st.set_page_config(page_title="Mapa Corsan", layout="wide")
 
 st.title("🗺️ Mapa das regionais Corsan")
-st.markdown("Explore o mapa interativo ou baixe as versões em alta resolução nas abas seguintes.")
+st.markdown("Explore o mapa interativo das cidades atendidas pela Corsan.")
 
 @st.cache_data
 def load_data():
