@@ -14,7 +14,7 @@ st.markdown("Explore o mapa interativo das cidades atendidas pela Corsan.")
 @st.cache_data
 def load_data():
     mapa = gpd.read_file("rs_municipios.geojson").to_crs(epsg=4326)
-    planilha = pd.read_excel("Reestruturaao_Oficial_1.xlsx")
+    planilha = pd.read_excel("mapa_dados_cidades_lojas.xlsx")
     return mapa, planilha
 
 with st.spinner("Carregando base de dados e mapas..."):
