@@ -14,7 +14,7 @@ st.markdown("Explore o mapa interativo das cidades atendidas pela Corsan.")
 @st.cache_data
 def load_data():
     mapa = gpd.read_file("rs_municipios.geojson").to_crs(epsg=4326)
-    planilha = pd.read_excel("Reestruturaao_Oficial_1.xlsx")
+    planilha = pd.read_excel("mapa_dados_cidades_lojas.xlsx")
     return mapa, planilha
 
 with st.spinner("Carregando base de dados e mapas..."):
@@ -24,16 +24,27 @@ with st.spinner("Carregando base de dados e mapas..."):
         st.error("⚠️ Arquivo não encontrado! Verifique os nomes dos arquivos na pasta.")
         st.stop()
 
-df['CIDADE'] = df['CIDADE'].astype(str).str.upper().str.strip()
-rs_map['name_muni'] = rs_map['name_muni'].astype(str).str.upper().str.strip()
+# --- TRATAMENTO DE ACENTOS E PADRONIZAÇÃO ---
+# Função que remove acentos, espaços extras e deixa tudo em maiúsculo
+def padronizar_nomes(serie):
+    return serie.astype(str).str.upper().str.strip().str.normalize('NFKD').str.encode('ascii', errors='ignore').str.decode('utf-8')
 
-mapa_diretorias = rs_map.merge(df, how="left", left_on="name_muni", right_on="CIDADE")
+# Cria colunas invisíveis apenas para garantir que o cruzamento seja perfeito
+df['CIDADE_TRATADA'] = padronizar_nomes(df['CIDADE'])
+rs_map['name_muni_tratado'] = padronizar_nomes(rs_map['name_muni'])
+
+# Mantém o nome original no mapa para exibição correta na tela
+rs_map['name_muni'] = rs_map['name_muni'].astype(str).str.strip()
+
+# PREVENÇÃO DE DUPLICATAS NO MAPA (caso a cidade tenha 2 lojas)
+df_mapa = df[['CIDADE_TRATADA', 'DIRETORIA']].drop_duplicates(subset=['CIDADE_TRATADA'])
+
+# Cruzamento usando a coluna sem acentos
+mapa_diretorias = rs_map.merge(df_mapa, how="left", left_on="name_muni_tratado", right_on="CIDADE_TRATADA")
 mapa_diretorias['DIRETORIA'] = mapa_diretorias['DIRETORIA'].fillna('Sem Diretoria')
 cidades_destaque = mapa_diretorias[mapa_diretorias['DIRETORIA'] != 'Sem Diretoria']
 
 # CORES FIXAS DAS REGIONAIS
-# ==========================================
-# Altere os códigos hexadecimais abaixo se desejar mudar as cores no futuro
 dicionario_cores = {
     'CENTRAL': '#F8DC00', # Amarelo Pequi
     'LESTE': '#17E3CB',   # Turquesa Rio
@@ -41,8 +52,7 @@ dicionario_cores = {
     'OESTE': '#0027BD',   # Azul Mar
     'SUL': '#A11FFF'      # Roxo Açai
 }
-diretorias_unicas = sorted(df['DIRETORIA'].dropna().unique())
-
+diretorias_unicas = sorted(df_mapa['DIRETORIA'].dropna().unique())
 
 nomes_abas = ["📍 Mapa Interativo", "Visão Geral (Download)"] + diretorias_unicas
 abas = st.tabs(nomes_abas)
@@ -55,47 +65,67 @@ with abas[0]:
 
     lista_cidades = sorted(cidades_destaque['name_muni'].unique())
 
-    # 1. Inicializa variáveis de estado (incluindo a chave de reset do mapa)
     if 'cidade_selecionada' not in st.session_state:
         st.session_state.cidade_selecionada = None
     if 'map_key' not in st.session_state:
         st.session_state.map_key = 0
 
-    # Descobre a posição da cidade na lista
     index_selecionado = None
     if st.session_state.cidade_selecionada in lista_cidades:
         index_selecionado = lista_cidades.index(st.session_state.cidade_selecionada)
 
-    # 2. Interface de busca e botão de limpar lado a lado
     col1, col2 = st.columns([4, 1])
 
     with col1:
         nova_selecao = st.selectbox(
-            "🔍 Digite, selecione ou clique no mapa para destacar uma cidade:", 
-            lista_cidades, 
+            "🔍 Digite, selecione ou clique no mapa para destacar uma cidade:",
+            lista_cidades,
             index=index_selecionado,
             placeholder="Escolha uma cidade..."
         )
 
+        # --- EXIBIÇÃO DE ENDEREÇOS E HORÁRIOS ---
+        if nova_selecao:
+            # Pega o nome tratado da cidade selecionada para buscar na planilha
+            cidade_tratada_selecionada = padronizar_nomes(pd.Series([nova_selecao])).iloc[0]
+            dados_cidade = df[df['CIDADE_TRATADA'] == cidade_tratada_selecionada]
+
+            col_end = 'ENDERECO' if 'ENDERECO' in df.columns else (df.columns[6] if len(df.columns) > 6 else None)
+            col_hor = 'HORARIO' if 'HORARIO' in df.columns else (df.columns[7] if len(df.columns) > 7 else None)
+
+            if col_end:
+                colunas_filtro = [col_end, col_hor] if col_hor else [col_end]
+                lojas = dados_cidade[colunas_filtro].dropna(subset=[col_end]).drop_duplicates()
+                lojas = lojas[~lojas[col_end].astype(str).str.strip().str.lower().isin(['nan', 'none', ''])]
+
+                if not lojas.empty:
+                    st.markdown("##### 🏢 Lojas de Atendimento")
+                    for _, loja in lojas.iterrows():
+                        end = str(loja[col_end]).strip()
+                        texto_loja = f"📍 **Endereço:** {end}"
+
+                        if col_hor:
+                            hor = str(loja[col_hor]).strip()
+                            if hor.lower() not in ['nan', 'none', '']:
+                                texto_loja += f"  \n🕒 **Horário:** {hor}"
+
+                        st.info(texto_loja)
+
     with col2:
-        st.write("") # Espaçamento para alinhar os botões
+        st.write("") 
         st.write("")
         if st.button("🗑️ Limpar Seleção", use_container_width=True):
-            nova_selecao = None # Força a limpeza se o botão for clicado
+            nova_selecao = None 
 
-    # 3. Lógica de atualização: Se a seleção mudou (pela caixa ou pelo botão)
     if nova_selecao != st.session_state.cidade_selecionada:
         st.session_state.cidade_selecionada = nova_selecao
-        # A MÁGICA: Se a seleção ficou vazia, muda a chave do mapa para forçar ele a esquecer o clique anterior
         if nova_selecao is None:
             st.session_state.map_key += 1
         st.rerun()
 
     cidade_atual = st.session_state.cidade_selecionada
-
     mapa_interativo = mapa_diretorias.copy()
 
-    # Variáveis padrão de câmera
     mapa_zoom = 5.5
     mapa_centro = {"lat": -30.0, "lon": -53.5}
 
@@ -117,12 +147,11 @@ with abas[0]:
         mapa_interativo['Status_Cor'] = mapa_interativo.apply(definir_destaque, axis=1)
 
         cores_plotly = {
-            '📍 Cidade Selecionada': '#FF0000', 
+            '📍 Cidade Selecionada': '#FF0000',
             f'Regional: {regional_alvo}': dicionario_cores[regional_alvo],
             'Outras Regiões': '#F0F0F0'
         }
 
-        # Lógica de zoom automático
         geometria_cidade = mapa_interativo[mapa_interativo['name_muni'] == cidade_atual].geometry.iloc[0]
         centroide = geometria_cidade.centroid
         mapa_centro = {"lat": centroide.y, "lon": centroide.x}
@@ -147,17 +176,15 @@ with abas[0]:
 
     fig_interativa.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
 
-    # 4. Renderiza o mapa usando a chave dinâmica
     evento_mapa = st.plotly_chart(
-        fig_interativa, 
+        fig_interativa,
         use_container_width=True,
         on_select="rerun",
         selection_mode="points",
         config={'scrollZoom': True},
-        key=f"mapa_interativo_{st.session_state.map_key}" # Chave que reseta a memória do mapa
+        key=f"mapa_interativo_{st.session_state.map_key}" 
     )
 
-    # 5. Lógica de clique no mapa
     if evento_mapa and len(evento_mapa.selection["points"]) > 0:
         cidade_clicada = evento_mapa.selection["points"][0]["location"]
         if cidade_clicada != st.session_state.cidade_selecionada:
