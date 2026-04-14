@@ -14,7 +14,7 @@ st.markdown("Explore o mapa interativo das cidades atendidas pela Corsan.")
 @st.cache_data
 def load_data():
     mapa = gpd.read_file("rs_municipios.geojson").to_crs(epsg=4326)
-    planilha = pd.read_excel("mapa_dados_cidades_lojas.xlsx")
+    planilha = pd.read_excel("Reestruturaao_Oficial_1.xlsx")
     return mapa, planilha
 
 with st.spinner("Carregando base de dados e mapas..."):
@@ -24,14 +24,23 @@ with st.spinner("Carregando base de dados e mapas..."):
         st.error("⚠️ Arquivo não encontrado! Verifique os nomes dos arquivos na pasta.")
         st.stop()
 
-df['CIDADE'] = df['CIDADE'].astype(str).str.upper().str.strip()
-rs_map['name_muni'] = rs_map['name_muni'].astype(str).str.upper().str.strip()
+# --- TRATAMENTO DE ACENTOS E PADRONIZAÇÃO ---
+# Função que remove acentos, espaços extras e deixa tudo em maiúsculo
+def padronizar_nomes(serie):
+    return serie.astype(str).str.upper().str.strip().str.normalize('NFKD').str.encode('ascii', errors='ignore').str.decode('utf-8')
 
-# PREVENÇÃO DE DUPLICATAS NO MAPA: 
-# Pega apenas 1 linha por cidade para o mapa não desenhar polígonos sobrepostos
-df_mapa = df[['CIDADE', 'DIRETORIA']].drop_duplicates(subset=['CIDADE'])
+# Cria colunas invisíveis apenas para garantir que o cruzamento seja perfeito
+df['CIDADE_TRATADA'] = padronizar_nomes(df['CIDADE'])
+rs_map['name_muni_tratado'] = padronizar_nomes(rs_map['name_muni'])
 
-mapa_diretorias = rs_map.merge(df_mapa, how="left", left_on="name_muni", right_on="CIDADE")
+# Mantém o nome original no mapa para exibição correta na tela
+rs_map['name_muni'] = rs_map['name_muni'].astype(str).str.strip()
+
+# PREVENÇÃO DE DUPLICATAS NO MAPA (caso a cidade tenha 2 lojas)
+df_mapa = df[['CIDADE_TRATADA', 'DIRETORIA']].drop_duplicates(subset=['CIDADE_TRATADA'])
+
+# Cruzamento usando a coluna sem acentos
+mapa_diretorias = rs_map.merge(df_mapa, how="left", left_on="name_muni_tratado", right_on="CIDADE_TRATADA")
 mapa_diretorias['DIRETORIA'] = mapa_diretorias['DIRETORIA'].fillna('Sem Diretoria')
 cidades_destaque = mapa_diretorias[mapa_diretorias['DIRETORIA'] != 'Sem Diretoria']
 
@@ -75,26 +84,22 @@ with abas[0]:
             placeholder="Escolha uma cidade..."
         )
 
-        # --- NOVA LÓGICA: EXIBIÇÃO DE ENDEREÇOS E HORÁRIOS ---
+        # --- EXIBIÇÃO DE ENDEREÇOS E HORÁRIOS ---
         if nova_selecao:
-            # Filtra todas as linhas da cidade selecionada na planilha original
-            dados_cidade = df[df['CIDADE'] == nova_selecao]
+            # Pega o nome tratado da cidade selecionada para buscar na planilha
+            cidade_tratada_selecionada = padronizar_nomes(pd.Series([nova_selecao])).iloc[0]
+            dados_cidade = df[df['CIDADE_TRATADA'] == cidade_tratada_selecionada]
 
-            # Identifica as colunas de endereço e horário (pelo nome ou pela posição 7 e 8)
             col_end = 'ENDERECO' if 'ENDERECO' in df.columns else (df.columns[6] if len(df.columns) > 6 else None)
             col_hor = 'HORARIO' if 'HORARIO' in df.columns else (df.columns[7] if len(df.columns) > 7 else None)
 
             if col_end:
-                # Isola as colunas, remove linhas sem endereço e remove duplicatas (para não repetir a mesma loja)
                 colunas_filtro = [col_end, col_hor] if col_hor else [col_end]
                 lojas = dados_cidade[colunas_filtro].dropna(subset=[col_end]).drop_duplicates()
-
-                # Remove casos onde o Excel leu células vazias como a palavra 'nan'
                 lojas = lojas[~lojas[col_end].astype(str).str.strip().str.lower().isin(['nan', 'none', ''])]
 
                 if not lojas.empty:
                     st.markdown("##### 🏢 Lojas de Atendimento")
-                    # Cria um balão de informação para cada loja encontrada na cidade
                     for _, loja in lojas.iterrows():
                         end = str(loja[col_end]).strip()
                         texto_loja = f"📍 **Endereço:** {end}"
