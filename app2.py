@@ -126,7 +126,7 @@ with abas[0]:
     cidade_atual = st.session_state.cidade_selecionada
     mapa_interativo = mapa_diretorias.copy()
 
-    mapa_zoom = 5.5
+    mapa_zoom = 6.2
     mapa_centro = {"lat": -30.0, "lon": -53.5}
 
     if cidade_atual is None:
